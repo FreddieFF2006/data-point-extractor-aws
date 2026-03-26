@@ -229,7 +229,7 @@ export default function App() {
   const [fileObj, setFileObj] = useState(null);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("ALL");
-  const [batchSize, setBatchSize] = useState(25);
+  const [batchSize, setBatchSize] = useState(80);
   const [sideOpen, setSideOpen] = useState(true);
   const logRef = useRef(null);
 
@@ -329,12 +329,12 @@ export default function App() {
         } catch (err) {
           addLog(`    ✗ ${err.message}`);
           if (err.message.includes("429")) {
-            addLog("    Waiting 60s..."); await new Promise(r=>setTimeout(r,60000));
+            addLog("    Waiting 10s..."); await new Promise(r=>setTimeout(r,10000));
             try { const res = await classify(b, config); res.forEach(({id,cat})=>nm.set(id,cat)); addLog(`    → Retry: ${res.length}`); } catch(e2) { addLog(`    ✗ ${e2.message}`); }
           }
         }
         setDpMap(new Map(nm));
-        await new Promise(r=>setTimeout(r,5000));
+        await new Promise(r=>setTimeout(r, aiMode === "aws" ? 500 : 5000));
       }
       setDpMap(nm); setStatus("done");
       const fc={E:0,S:0,G:0,O:0}; nm.forEach(c=>{fc[c]=(fc[c]||0)+1;});
@@ -452,7 +452,7 @@ export default function App() {
                 <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11, color:"#52525b" }}>
                   <span>Batch:</span>
                   <select value={batchSize} onChange={e=>setBatchSize(+e.target.value)} style={{ background:"#0f0f14", border:"1px solid #27272a", borderRadius:5, padding:"2px 6px", color:"#a1a1aa", fontSize:11 }}>
-                    {[15,20,25,30,40].map(n=><option key={n} value={n}>{n}</option>)}
+                    {[40,60,80,100,150].map(n=><option key={n} value={n}>{n}</option>)}
                   </select>
                 </div>
                 {(status==="stage1"||status==="stage2") && <div style={{ marginTop:6 }}><div style={{ background:"#27272a", borderRadius:3, height:4, overflow:"hidden" }}><div style={{ height:"100%", background:status==="stage1"?"#f59e0b":"linear-gradient(90deg,#4f46e5,#7c3aed)", width:`${progress.pct}%`, transition:"width 0.3s" }}/></div><div style={{ fontSize:10, color:"#52525b", marginTop:3 }}>{progress.detail}</div></div>}

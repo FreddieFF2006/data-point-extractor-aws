@@ -1,13 +1,15 @@
 import json
 import boto3
 import os
+import re
 
 bedrock = boto3.client(
     "bedrock-runtime",
     region_name=os.environ.get("AWS_REGION", "ap-northeast-1")
 )
 
-MODEL_ID = os.environ.get("MODEL_ID", "anthropic.claude-sonnet-4-20250514-v1:0")
+# Try Claude 3.5 Sonnet first (widely available), fall back to others
+MODEL_ID = os.environ.get("MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
 
 SYSTEM_PROMPT = """You are a strict, consistent classifier of numerical data points in corporate reports. Apply the SAME rules every time without variation.
 
@@ -15,7 +17,7 @@ TASK: For each candidate (number + sentence), decide if it is a DATA POINT. If y
 
 A DATA POINT is a specific numerical figure that MEASURES something. It must be a metric, KPI, target, count, percentage, monetary amount, or ratio that would be verified year-over-year.
 
-STRICT RULES — always include:
+STRICT RULES - always include:
 1. ANY percentage in a performance/target context
 2. ANY count of people, sites, countries, organizations
 3. ANY monetary amount (yen, USD, EUR, billion, million)
@@ -23,7 +25,7 @@ STRICT RULES — always include:
 5. ANY ratio like 1:53 or 1:210
 6. Share counts, shareholder counts, board member counts
 
-ALWAYS EXCLUDE — these are NEVER data points:
+ALWAYS EXCLUDE - these are NEVER data points:
 1. Years: ANY 4-digit number 1900-2059 used as a year
 2. Dates: "March 31", "fiscal year 2023", FY2023
 3. Page numbers, section numbers, TOC references
@@ -47,54 +49,37 @@ No markdown. No explanation. Just the array."""
 
 
 def handler(event, context):
-    """
-    Lambda handler. Expects POST body:
-    {
-        "candidates": [
-            {"id": 0, "number": "35%", "sentence": "..."},
-            ...
-        ]
-    }
-    Returns:
-    {
-        "results": [{"id": 0, "cat": "E"}, ...]
-    }
-    """
-    # Handle CORS preflight
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Content-Type": "application/json",
     }
 
-    if event.get("httpMethod") == "OPTIONS":
+    # API Gateway v2 uses requestContext.http.method
+    method = "POST"
+    if "requestContext" in event:
+        method = event.get("requestContext", {}).get("http", {}).get("method", "POST")
+    elif "httpMethod" in event:
+        method = event["httpMethod"]
+
+    if method == "OPTIONS":
         return {"statusCode": 200, "headers": headers, "body": ""}
 
     try:
-        # Parse input
         body = json.loads(event.get("body", "{}"))
         candidates = body.get("candidates", [])
 
         if not candidates:
-            return {
-                "statusCode": 400,
-                "headers": headers,
-                "body": json.dumps({"error": "No candidates provided"}),
-            }
+            return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "No candidates"})}
 
-        # Build user message
         lines = []
         for c in candidates:
             sentence = c.get("sentence", "")[:250]
             lines.append(f'ID:{c["id"]} | {c["number"]} | "{sentence}"')
 
-        user_msg = (
-            "Classify each candidate strictly. Return ONLY a JSON array of "
-            "{id, cat} for items that ARE data points. Omit everything else.\n\n"
-            + "\n".join(lines)
-        )
+        user_msg = "Classify each candidate strictly. Return ONLY a JSON array of {{id, cat}} for data points. Omit non-data-points.\n\n" + "\n".join(lines)
 
-        # Call Bedrock
         request_body = json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 4000,
@@ -112,40 +97,21 @@ def handler(event, context):
 
         result = json.loads(response["body"].read())
         text = result["content"][0]["text"].strip()
-
-        # Parse response
-        import re
         text = re.sub(r"^```\w*\n?", "", text)
         text = re.sub(r"\n?```$", "", text)
         match = re.search(r"\[[\s\S]*?\]", text)
 
         if match:
             data_points = json.loads(match.group(0))
-            # Normalize
             normalized = []
             for item in data_points:
                 if isinstance(item, dict):
-                    normalized.append({
-                        "id": item.get("id"),
-                        "cat": item.get("cat", "O").upper(),
-                    })
+                    normalized.append({"id": item.get("id"), "cat": item.get("cat", "O").upper()})
                 elif isinstance(item, (int, float)):
                     normalized.append({"id": int(item), "cat": "O"})
-            return {
-                "statusCode": 200,
-                "headers": headers,
-                "body": json.dumps({"results": normalized}),
-            }
+            return {"statusCode": 200, "headers": headers, "body": json.dumps({"results": normalized})}
         else:
-            return {
-                "statusCode": 200,
-                "headers": headers,
-                "body": json.dumps({"results": []}),
-            }
+            return {"statusCode": 200, "headers": headers, "body": json.dumps({"results": []})}
 
     except Exception as e:
-        return {
-            "statusCode": 500,
-            "headers": headers,
-            "body": json.dumps({"error": str(e)}),
-        }
+        return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)})}
