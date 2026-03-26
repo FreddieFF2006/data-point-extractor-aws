@@ -165,17 +165,30 @@ export default function App() {
       setPages(numPages);
       setMsgs(h => [...h, { role: "system", content: `${cs.length} candidates found in ${numPages} pages. Running AI classification...` }]);
       setStatus("classifying");
-      const dm = new Map(); const bs = 80; const tb = Math.ceil(cs.length / bs);
-      for (let i = 0; i < cs.length; i += bs) {
-        const b = cs.slice(i, i + bs), bn = Math.floor(i / bs) + 1;
-        setProg(`Batch ${bn}/${tb}`);
-        try { (await classify(b)).forEach(({ id, cat }) => dm.set(id, cat)); }
-        catch (err) {
-          setMsgs(h => [...h, { role: "system", content: `Batch ${bn} error: ${err.message}. Retrying...` }]);
-          await new Promise(r => setTimeout(r, 10000));
-          try { (await classify(b)).forEach(({ id, cat }) => dm.set(id, cat)); } catch {}
-        }
-        await new Promise(r => setTimeout(r, 500));
+      const dm = new Map();
+      const bs = 100; // bigger batches
+      const PARALLEL = 5; // concurrent requests
+      const batches = [];
+      for (let i = 0; i < cs.length; i += bs) batches.push(cs.slice(i, i + bs));
+      const tb = batches.length;
+      let done = 0;
+
+      // Process batches in parallel waves
+      for (let w = 0; w < tb; w += PARALLEL) {
+        const wave = batches.slice(w, w + PARALLEL);
+        const promises = wave.map(async (batch) => {
+          try {
+            return await classify(batch);
+          } catch (err) {
+            // Retry once
+            await new Promise(r => setTimeout(r, 3000));
+            try { return await classify(batch); } catch { return []; }
+          }
+        });
+        const results = await Promise.all(promises);
+        results.forEach(res => res.forEach(({ id, cat }) => dm.set(id, cat)));
+        done += wave.length;
+        setProg(`${done}/${tb} batches`);
       }
       const result = cs.filter(c => dm.has(c.id)).map(c => ({ ...c, cat: dm.get(c.id) })).sort((a, b) => a.page - b.page);
       setDps(result); setStatus("done"); setProg("");
