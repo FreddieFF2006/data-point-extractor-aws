@@ -152,6 +152,9 @@ export default function App() {
         const results = await Promise.all(wave.map(async b => { try { return await classify(b); } catch { await new Promise(r => setTimeout(r, 3000)); try { return await classify(b); } catch { return []; } } }));
         results.forEach(res => res.forEach(({ id, cat }) => dm.set(id, cat)));
         done += wave.length; setProg(`${done}/${batches.length} batches`);
+        // Live update: show data points found so far
+        const liveDps = cs.filter(c => dm.has(c.id)).map(c => ({ ...c, cat: dm.get(c.id) })).sort((a, b) => a.page - b.page);
+        setDps(liveDps);
       }
       const result = cs.filter(c => dm.has(c.id)).map(c => ({ ...c, cat: dm.get(c.id) })).sort((a, b) => a.page - b.page);
       setDps(result); setStatus("done"); setProg("");
@@ -288,6 +291,54 @@ export default function App() {
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
           {tab === "chat" && <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+
+            {/* Live stats during extraction */}
+            {(status === "extracting" || status === "classifying" || (status === "done" && total > 0)) && total > 0 && (
+              <div style={{ borderBottom: `1px solid ${B.bd}`, padding: "12px 20px", flexShrink: 0, background: B.s }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+                  {/* Mini pie */}
+                  <div style={{ flexShrink: 0 }}>
+                    {(() => {
+                      const sz = 52, cx = 26, cy = 26, r = 22, ir = 14;
+                      let a = -Math.PI / 2;
+                      const arcs = ["E", "S", "G", "O"].map(k => {
+                        const p = total > 0 ? cc[k] / total : 0, sw = p * Math.PI * 2, st = a; a += sw;
+                        if (p < 0.003) return { k, d: "" };
+                        const lg = sw > Math.PI ? 1 : 0;
+                        return { k, d: `M${cx+r*Math.cos(st)},${cy+r*Math.sin(st)} A${r},${r} 0 ${lg} 1 ${cx+r*Math.cos(a)},${cy+r*Math.sin(a)} L${cx+ir*Math.cos(a)},${cy+ir*Math.sin(a)} A${ir},${ir} 0 ${lg} 0 ${cx+ir*Math.cos(st)},${cy+ir*Math.sin(st)} Z` };
+                      });
+                      return <svg width={sz} height={sz} viewBox={`0 0 ${sz} ${sz}`}>
+                        {arcs.map(a => a.d && <path key={a.k} d={a.d} fill={ESG[a.k].color} opacity={0.8} stroke={B.p} strokeWidth={1} />)}
+                        <text x={cx} y={cy + 1} textAnchor="middle" dominantBaseline="central" fill={T.p} fontSize="11" fontWeight="700" fontFamily="system-ui">{total}</text>
+                      </svg>;
+                    })()}
+                  </div>
+                  {/* Category counts */}
+                  <div style={{ display: "flex", gap: 16 }}>
+                    {["E", "S", "G", "O"].map(k => (
+                      <div key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 2, background: ESG[k].color }} />
+                        <span style={{ fontSize: 11, color: T.m }}>{ESG[k].name}</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: ESG[k].color, fontVariantNumeric: "tabular-nums" }}>{cc[k]}</span>
+                        {total > 0 && <span style={{ fontSize: 10, color: T.d }}>({((cc[k] / total) * 100).toFixed(0)}%)</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ flex: 1 }} />
+                  {/* Progress indicator */}
+                  {(status === "extracting" || status === "classifying") && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 100, height: 4, background: B.bd, borderRadius: 2, overflow: "hidden" }}>
+                        <div className="pulse" style={{ height: "100%", background: "#818cf8", borderRadius: 2, width: status === "extracting" ? "30%" : "100%", transition: "width 0.3s" }} />
+                      </div>
+                      <span style={{ fontSize: 11, color: T.m, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{prog}</span>
+                    </div>
+                  )}
+                  {status === "done" && <span style={{ fontSize: 11, color: ESG.E.color, fontWeight: 500 }}>Complete</span>}
+                </div>
+              </div>
+            )}
+
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
               {msgs.length === 0 && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 12 }}>
                 <div style={{ width: 48, height: 48, borderRadius: 12, background: B.el, border: `1px solid ${B.bd}`, display: "flex", alignItems: "center", justifyContent: "center" }}><ChatIcon size={24} color={T.d} /></div>
