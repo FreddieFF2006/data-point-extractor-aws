@@ -1,7 +1,8 @@
 import json
 import boto3
-import os
 import time
+import traceback
+from decimal import Decimal
 
 dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
 table = dynamodb.Table("data-point-sessions")
@@ -14,15 +15,35 @@ HEADERS = {
 }
 
 
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return int(o) if o % 1 == 0 else float(o)
+        return super().default(o)
+
+
+def clean_for_dynamo(obj):
+    """Recursively clean data for DynamoDB: no floats, no empty strings."""
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: clean_for_dynamo(v) for k, v in obj.items() if v != "" and v is not None}
+    if isinstance(obj, list):
+        return [clean_for_dynamo(i) for i in obj]
+    if isinstance(obj, str) and obj == "":
+        return None
+    return obj
+
+
 def handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
-    
+
     if method == "OPTIONS":
         return {"statusCode": 200, "headers": HEADERS, "body": ""}
 
     try:
         if method == "GET":
-            return list_sessions(event)
+            return list_sessions()
         elif method == "POST":
             return save_session(event)
         elif method == "DELETE":
@@ -30,21 +51,24 @@ def handler(event, context):
         else:
             return {"statusCode": 405, "headers": HEADERS, "body": json.dumps({"error": "Method not allowed"})}
     except Exception as e:
+        print(f"ERROR: {str(e)}")
+        print(traceback.format_exc())
         return {"statusCode": 500, "headers": HEADERS, "body": json.dumps({"error": str(e)})}
 
 
-def list_sessions(event):
-    result = table.scan(
-        ProjectionExpression="sessionId, #n, createdAt, fileName, dataPointCount, chatCount",
-        ExpressionAttributeNames={"#n": "name"}
-    )
-    items = sorted(result.get("Items", []), key=lambda x: x.get("createdAt", ""), reverse=True)
-    # Convert Decimal to int/float for JSON
-    for item in items:
-        for k, v in item.items():
-            if hasattr(v, "as_integer_ratio"):
-                item[k] = int(v) if v == int(v) else float(v)
-    return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"sessions": items})}
+def list_sessions():
+    try:
+        result = table.scan(
+            ProjectionExpression="sessionId, #n, createdAt, fileName, dataPointCount, chatCount",
+            ExpressionAttributeNames={"#n": "name"}
+        )
+        items = result.get("Items", [])
+        items = sorted(items, key=lambda x: x.get("createdAt", ""), reverse=True)
+        return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"sessions": items}, cls=DecimalEncoder)}
+    except Exception as e:
+        print(f"LIST ERROR: {str(e)}")
+        print(traceback.format_exc())
+        return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"sessions": []})}
 
 
 def save_session(event):
@@ -55,19 +79,19 @@ def save_session(event):
 
     item = {
         "sessionId": session_id,
-        "name": body.get("name", "Untitled"),
-        "fileName": body.get("fileName", ""),
-        "createdAt": body.get("createdAt", str(int(time.time() * 1000))),
-        "dataPoints": body.get("dataPoints", []),
+        "name": body.get("name") or "Untitled",
+        "fileName": body.get("fileName") or "none",
+        "createdAt": body.get("createdAt") or str(int(time.time())),
         "dataPointCount": body.get("dataPointCount", 0),
-        "candidates": body.get("candidates", []),
-        "chatHistory": body.get("chatHistory", []),
         "chatCount": len(body.get("chatHistory", [])),
-        "catCounts": body.get("catCounts", {}),
         "totalPages": body.get("totalPages", 0),
+        "dataPoints": body.get("dataPoints", []),
+        "chatHistory": body.get("chatHistory", []),
+        "catCounts": body.get("catCounts", {}),
     }
 
-    table.put_item(Item=json.loads(json.dumps(item), parse_float=str))
+    cleaned = clean_for_dynamo(item)
+    table.put_item(Item=cleaned)
     return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"saved": session_id})}
 
 
@@ -75,8 +99,11 @@ def delete_session(event):
     params = event.get("queryStringParameters") or {}
     session_id = params.get("sessionId", "")
     if not session_id:
-        body = json.loads(event.get("body", "{}"))
-        session_id = body.get("sessionId", "")
+        try:
+            body = json.loads(event.get("body", "{}"))
+            session_id = body.get("sessionId", "")
+        except:
+            pass
     if not session_id:
         return {"statusCode": 400, "headers": HEADERS, "body": json.dumps({"error": "sessionId required"})}
 
