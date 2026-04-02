@@ -129,19 +129,22 @@ export default function App() {
   };
 
   const removeSession = async (id) => {
+    if (sid === id) { setSid(null); setDps([]); setMsgs([]); setStatus("idle"); setFname(""); }
     setSessions(p => p.filter(x => x.sessionId !== id));
     await delSession(id);
-    if (sid === id) { setSid(null); setDps([]); setMsgs([]); setStatus("idle"); }
   };
 
   // Auto-save to DynamoDB
   const persist = useCallback(async () => {
-    if (!sid || !getApi()) return;
+    if (!sid || !getApi() || dps.length === 0) return;
+    // Don't save if session was deleted from sidebar
+    const stillExists = sessions.some(s => s.sessionId === sid);
+    if (!stillExists) return;
     const cc = { E: 0, S: 0, G: 0, O: 0 }; dps.forEach(d => { cc[d.cat] = (cc[d.cat] || 0) + 1; });
     const sess = { sessionId: sid, name: fname || "Untitled", fileName: fname, createdAt: new Date().toISOString(), dataPoints: dps, dataPointCount: dps.length, chatHistory: msgs, chatCount: msgs.length, catCounts: cc, totalPages: pages };
     await saveSession(sess);
     setSessions(prev => prev.map(s => s.sessionId === sid ? { ...s, fileName: fname, dataPointCount: dps.length, chatCount: msgs.length } : s));
-  }, [sid, dps, msgs, fname, pages]);
+  }, [sid, dps, msgs, fname, pages, sessions]);
   useEffect(() => { const t = setTimeout(persist, 3000); return () => clearTimeout(t); }, [persist]);
 
   // ── File handling ──
