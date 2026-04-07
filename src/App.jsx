@@ -195,8 +195,7 @@ export default function App() {
   const running = status === "extracting" || status === "classifying";
 
   return (
-    <div style={{ display: "flex", height: "100vh", background: "#0d0d0d", fontFamily: "'Geist', 'SF Pro Text', -apple-system, system-ui, sans-serif", color: "#ececec", overflow: "hidden", letterSpacing: "-0.011em" }}>
-      <link href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-sans/style.min.css" rel="stylesheet" />
+    <div style={{ display: "flex", height: "100vh", background: "#0d0d0d", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif", color: "#ececec", overflow: "hidden", letterSpacing: "-0.011em" }}>
 
       {/* ─ Icon Rail ─ */}
       <div style={{ width: 56, minWidth: 56, background: "#0d0d0d", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 14, gap: 2, flexShrink: 0, borderRight: "1px solid #1a1a1c" }}>
